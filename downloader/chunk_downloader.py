@@ -7,6 +7,8 @@ import requests
 import threading
 import time
 import shutil
+import subprocess
+import hashlib
 from pathlib import Path
 import os
 from typing import Optional, Dict, Tuple, Union, TYPE_CHECKING
@@ -29,7 +31,8 @@ class ChunkDownloader:
     def __init__(self, url: str, output_path: str, num_connections: int = 4,
                  chunk_size: int = DEFAULT_CHUNK_SIZE, manager: 'DownloadManager' = None,
                  download_id: str = None, api_key: Optional[str] = None,
-                 known_size: Optional[int] = None):
+                 known_size: Optional[int] = None, download_engine: str = "auto",
+                 expected_hashes: Optional[Dict[str, str]] = None):
         # URLs
         self.initial_url = url
         self.url = url
@@ -45,6 +48,8 @@ class ChunkDownloader:
         self.download_id = download_id
         self.api_key = api_key
         self.known_size = known_size if known_size and known_size > 0 else None
+        self.download_engine = self._normalize_download_engine(download_engine)
+        self.expected_hashes = expected_hashes or {}
         
         # Download state
         self.total_size = self.known_size or 0
@@ -54,6 +59,7 @@ class ChunkDownloader:
         
         # Thread management
         self.threads = []
+        self.aria2_process = None
         self.lock = threading.Lock()
         self.cancel_event = threading.Event()
         self.part_files = []
@@ -63,6 +69,13 @@ class ChunkDownloader:
         self._last_update_time = 0
         self._last_downloaded_bytes = 0
         self._speed = 0
+
+    @staticmethod
+    def _normalize_download_engine(download_engine: Optional[str]) -> str:
+        if not isinstance(download_engine, str):
+            return "auto"
+        value = download_engine.strip().lower()
+        return value if value in {"auto", "builtin", "aria2"} else "auto"
 
     def _get_request_headers(self, add_range: Optional[str] = None) -> Dict[str, str]:
         """Constructs request headers with optional auth and range."""
@@ -86,6 +99,11 @@ class ChunkDownloader:
             self.error = "Download cancelled by user"
             if self.manager and self.download_id:
                 self.manager._update_download_status(self.download_id, status="cancelled", error=self.error)
+            if self.aria2_process and self.aria2_process.poll() is None:
+                try:
+                    self.aria2_process.terminate()
+                except Exception as e:
+                    print(f"[Downloader {self.download_id or 'N/A'}] Warning: Failed to terminate aria2c: {e}")
 
     def _cleanup_temp(self, success: bool):
         """Remove temporary directory and potentially the output file."""
@@ -154,6 +172,34 @@ class ChunkDownloader:
         except Exception as e:
             print(f"[Downloader {self.download_id}] Warning: Unexpected error during HEAD request: {e}. Proceeding with Single connection.")
             return self.initial_url, False
+
+    def _verify_range_get_support(self) -> bool:
+        """Confirm the server really honors Range with a tiny GET."""
+        try:
+            response = requests.get(
+                self.url,
+                headers=self._get_request_headers(add_range="bytes=0-0"),
+                stream=True,
+                timeout=self.HEAD_REQUEST_TIMEOUT,
+                allow_redirects=True,
+            )
+            try:
+                if response.status_code != 206:
+                    print(f"[Downloader {self.download_id}] Range probe returned {response.status_code}, not 206.")
+                    return False
+                content_range = response.headers.get("Content-Range", "")
+                if "/" in content_range and self.total_size <= 0:
+                    total_part = content_range.rsplit("/", 1)[-1]
+                    if total_part.isdigit():
+                        self.total_size = int(total_part)
+                self.url = response.url
+                print(f"[Downloader {self.download_id}] Range probe OK.")
+                return True
+            finally:
+                response.close()
+        except Exception as e:
+            print(f"[Downloader {self.download_id}] Range probe failed: {e}")
+            return False
 
     def _update_progress(self, chunk_len: int):
         """Thread-safe update of download progress and speed calculation."""
@@ -397,6 +443,137 @@ class ChunkDownloader:
             if response:
                 response.close()
 
+    def _aria2_available(self) -> bool:
+        return shutil.which("aria2c") is not None
+
+    def _do_aria2_download(self, supports_ranges: bool) -> bool:
+        aria2_path = shutil.which("aria2c")
+        if not aria2_path:
+            self.error = "aria2c was selected but was not found on PATH."
+            print(f"[Downloader {self.download_id}] Error: {self.error}")
+            return False
+
+        split_count = self.num_connections if supports_ranges and self.num_connections > 1 else 1
+        self.connection_type = f"aria2 ({split_count})"
+        if self.manager and self.download_id:
+            self.manager._update_download_status(self.download_id, connection_type=self.connection_type, status="downloading")
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.output_path.exists():
+            try:
+                self.output_path.unlink()
+            except Exception as e:
+                self.error = f"Could not remove existing output before aria2 download: {e}"
+                print(f"[Downloader {self.download_id}] Error: {self.error}")
+                return False
+
+        command = [
+            aria2_path,
+            "--allow-overwrite=true",
+            "--auto-file-renaming=false",
+            "--continue=false",
+            "--file-allocation=none",
+            "--console-log-level=warn",
+            "--summary-interval=0",
+            "--max-tries=3",
+            "--retry-wait=2",
+            f"--timeout={self.DOWNLOAD_TIMEOUT}",
+            f"--connect-timeout={self.HEAD_REQUEST_TIMEOUT}",
+            f"--max-connection-per-server={split_count}",
+            f"--split={split_count}",
+            "--min-split-size=1M",
+            "--dir", str(self.output_path.parent),
+            "--out", self.output_path.name,
+        ]
+        if self.api_key:
+            command.extend(["--header", f"Authorization: Bearer {self.api_key}"])
+        command.append(self.url)
+
+        print(f"[Downloader {self.download_id}] Starting aria2c download for {self.output_path.name} with {split_count} connection(s).")
+        self._start_time = self._start_time or time.monotonic()
+        self._last_update_time = self._start_time
+        self._last_downloaded_bytes = 0
+        self.downloaded = 0
+
+        try:
+            self.aria2_process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(self.output_path.parent),
+            )
+            while self.aria2_process.poll() is None:
+                if self.is_cancelled:
+                    self.aria2_process.terminate()
+                    try:
+                        self.aria2_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.aria2_process.kill()
+                    self.error = self.error or "Download cancelled by user"
+                    return False
+
+                if self.output_path.exists():
+                    current_size = self.output_path.stat().st_size
+                    delta = max(0, current_size - self.downloaded)
+                    if delta:
+                        self._update_progress(delta)
+                time.sleep(self.STATUS_UPDATE_INTERVAL)
+
+            stdout, stderr = self.aria2_process.communicate()
+            if self.output_path.exists():
+                current_size = self.output_path.stat().st_size
+                delta = max(0, current_size - self.downloaded)
+                if delta:
+                    self._update_progress(delta)
+
+            if self.aria2_process.returncode != 0:
+                detail = (stderr or stdout or "").strip().splitlines()
+                tail = detail[-1] if detail else f"exit code {self.aria2_process.returncode}"
+                self.error = f"aria2c failed: {tail}"
+                print(f"[Downloader {self.download_id}] Error: {self.error}")
+                return False
+
+            print(f"[Downloader {self.download_id}] aria2c download completed.")
+            return True
+        except Exception as e:
+            self.error = f"aria2c download failed: {e}"
+            print(f"[Downloader {self.download_id}] Error: {self.error}")
+            return False
+        finally:
+            self.aria2_process = None
+
+    def _validate_final_file(self) -> bool:
+        if not self.output_path.exists():
+            self.error = self.error or "Download finished but the output file was not created."
+            return False
+
+        actual_size = self.output_path.stat().st_size
+        expected_size = self.known_size or self.total_size
+        if expected_size and abs(actual_size - expected_size) > 1024:
+            self.error = f"Downloaded file size mismatch. Expected {expected_size} bytes, got {actual_size} bytes."
+            print(f"[Downloader {self.download_id}] Error: {self.error}")
+            return False
+
+        expected_sha256 = None
+        for key, value in self.expected_hashes.items():
+            if isinstance(key, str) and key.upper() == "SHA256" and value:
+                expected_sha256 = str(value).strip().lower()
+                break
+
+        if expected_sha256:
+            digest = hashlib.sha256()
+            with open(self.output_path, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024 * 4), b""):
+                    digest.update(chunk)
+            actual_sha256 = digest.hexdigest().lower()
+            if actual_sha256 != expected_sha256:
+                self.error = "Downloaded file SHA256 did not match Civitai metadata."
+                print(f"[Downloader {self.download_id}] Error: {self.error}")
+                return False
+
+        return True
+
     def download(self) -> bool:
         """Main download method that chooses between multi-connection or fallback approach."""
         self._start_time = time.monotonic()
@@ -413,19 +590,36 @@ class ChunkDownloader:
 
         # Check range support and get final URL
         final_url, supports_ranges = self._get_range_support_and_url()
+        if supports_ranges:
+            supports_ranges = self._verify_range_get_support()
         
-        # Decide on download strategy
+        # Decide on download strategy. The old built-in threaded multi-connection
+        # path is kept for now but not selected automatically; aria2 is the
+        # supported parallel engine.
         use_multi_connection = False
-        if supports_ranges and self.num_connections > 1 and self.total_size > 0:
-            if self.total_size > self.MIN_SIZE_FOR_MULTI_MB * 1024 * 1024:
-                use_multi_connection = True
-            else:
-                print(f"[Downloader {self.download_id}] File size ({self.total_size / (1024*1024):.2f} MB) below threshold for multi-connection.")
         
         expected_final_size = self.total_size
 
         try:
-            if use_multi_connection:
+            use_aria2 = False
+            if self.download_engine == "aria2":
+                use_aria2 = True
+            elif self.download_engine == "auto":
+                use_aria2 = (
+                    self._aria2_available()
+                    and self.num_connections > 1
+                    and supports_ranges
+                    and self.total_size > self.MIN_SIZE_FOR_MULTI_MB * 1024 * 1024
+                )
+
+            if use_aria2:
+                success = self._do_aria2_download(supports_ranges)
+                if not success and self.download_engine == "auto" and not self.is_cancelled:
+                    print(f"[Downloader {self.download_id}] aria2c failed in auto mode. Falling back to built-in downloader.")
+                    self.error = None
+                    self.downloaded = 0
+                    success = self.fallback_download()
+            elif use_multi_connection:
                 # Multi-connection download approach
                 success = self._do_multi_connection_download()
             else:
@@ -439,6 +633,9 @@ class ChunkDownloader:
                 
                 if not success and not self.error:
                     self.error = "Single connection download failed."
+
+            if success:
+                success = self._validate_final_file()
 
         except KeyboardInterrupt:
             print(f"[Downloader {self.download_id}] Interrupted! Signalling cancellation.")

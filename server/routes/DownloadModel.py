@@ -45,6 +45,9 @@ async def route_download_model(request):
         req_file_id = data.get("file_id")
         req_file_name_contains = data.get("file_name_contains", "").strip()
         num_connections = int(data.get("num_connections", 4))
+        download_engine = str(data.get("download_engine", "auto")).strip().lower()
+        if download_engine not in ("auto", "builtin", "aria2"):
+            download_engine = "auto"
         force_redownload = bool(data.get("force_redownload", False))
         resolved_api_key = resolve_civitai_api_key(data)
         civitai_domain = resolve_civitai_domain(data)
@@ -302,6 +305,7 @@ async def route_download_model(request):
 
         # Ensure size is int or None
         known_size_bytes = api_size_bytes if api_size_bytes > 0 else None
+        expected_hashes = primary_file.get("hashes") if isinstance(primary_file.get("hashes"), dict) else {}
 
         # --- Prepare full download_info dict ---
         # Derive extra display attributes for UI/history
@@ -333,7 +337,9 @@ async def route_download_model(request):
             "url": download_url,
             "output_path": output_path,
             "num_connections": num_connections,
+            "download_engine": download_engine,
             "known_size": known_size_bytes,
+            "expected_hashes": expected_hashes,
             "api_key": resolved_api_key, # Pass API key for download auth if needed
             "civitai_domain": api.domain,
             # Retry/context fields

@@ -1,5 +1,7 @@
 import importlib.util
+import hashlib
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -55,9 +57,12 @@ def install_stubs():
     config = types.ModuleType("civicomfy_test.config")
     config.PLUGIN_ROOT = str(ROOT)
     config.MODEL_TYPE_DIRS = {}
+    config.DEFAULT_CHUNK_SIZE = 1024
+    config.DOWNLOAD_TIMEOUT = 60
+    config.HEAD_REQUEST_TIMEOUT = 25
     sys.modules.setdefault("civicomfy_test.config", config)
 
-    for subpackage in ("api", "utils", "server"):
+    for subpackage in ("api", "utils", "server", "downloader"):
         module = types.ModuleType(f"civicomfy_test.{subpackage}")
         module.__path__ = [str(ROOT / subpackage)]
         sys.modules.setdefault(f"civicomfy_test.{subpackage}", module)
@@ -67,6 +72,7 @@ install_stubs()
 civitai = load_module("civicomfy_test.api.civitai", "api/civitai.py")
 helpers = load_module("civicomfy_test.utils.helpers", "utils/helpers.py")
 server_utils = load_module("civicomfy_test.server.utils", "server/utils.py")
+chunk_downloader = load_module("civicomfy_test.downloader.chunk_downloader", "downloader/chunk_downloader.py")
 
 
 class DomainSupportTests(unittest.TestCase):
@@ -131,6 +137,37 @@ class CustomPathTests(unittest.TestCase):
     def test_process_custom_download_path_strips_traversal_and_unknown_variables(self):
         result = server_utils.process_custom_download_path("../{unknown}/{model_name}/..", {"name": "Safe"}, {}, None, "")
         self.assertEqual(result, "Safe")
+
+
+class DownloadEngineTests(unittest.TestCase):
+    def test_download_engine_normalization(self):
+        downloader_cls = chunk_downloader.ChunkDownloader
+        self.assertEqual(downloader_cls._normalize_download_engine("aria2"), "aria2")
+        self.assertEqual(downloader_cls._normalize_download_engine("builtin"), "builtin")
+        self.assertEqual(downloader_cls._normalize_download_engine("nope"), "auto")
+
+    def test_final_file_validation_uses_sha256(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "model.safetensors"
+            payload = b"civicomfy"
+            file_path.write_bytes(payload)
+            expected = hashlib.sha256(payload).hexdigest()
+
+            downloader = chunk_downloader.ChunkDownloader(
+                "https://civitai.com/api/download/models/1",
+                str(file_path),
+                known_size=len(payload),
+                expected_hashes={"SHA256": expected},
+            )
+            self.assertTrue(downloader._validate_final_file())
+
+            bad_downloader = chunk_downloader.ChunkDownloader(
+                "https://civitai.com/api/download/models/1",
+                str(file_path),
+                known_size=len(payload),
+                expected_hashes={"SHA256": "0" * 64},
+            )
+            self.assertFalse(bad_downloader._validate_final_file())
 
 
 if __name__ == "__main__":

@@ -74,7 +74,8 @@ class DownloadManager:
                 'url', 'output_path', 'num_connections', 'api_key', 'known_size',
                 'civitai_model_info', 'civitai_version_info', 'civitai_primary_file',
                 'thumbnail', 'filename', 'model_url_or_id', 'model_version_id', 'model_type',
-                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload'
+                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload',
+                'download_engine', 'expected_hashes'
             ]
             for key in required_for_retry:
                 if key not in download_info:
@@ -86,6 +87,10 @@ class DownloadManager:
                         download_info[key] = DEFAULT_CONNECTIONS
                     elif key == 'force_redownload':
                         download_info[key] = False # Default for new downloads
+                    elif key == 'download_engine':
+                        download_info[key] = "auto"
+                    elif key == 'expected_hashes':
+                        download_info[key] = {}
                     else:
                         download_info[key] = None
                     print(f"[Manager Warning] Queued item '{download_id}' missing '{key}', added default.")
@@ -610,7 +615,9 @@ class DownloadManager:
                 manager=self,
                 download_id=download_id,
                 api_key=download_info.get("api_key"),
-                known_size=download_info.get("known_size")
+                known_size=download_info.get("known_size"),
+                download_engine=download_info.get("download_engine", "auto"),
+                expected_hashes=download_info.get("expected_hashes") or {}
             )
 
             with self.lock:
@@ -717,7 +724,8 @@ class DownloadManager:
                 'url', 'output_path', 'num_connections', 'api_key', 'known_size',
                 'civitai_model_info', 'civitai_version_info', 'civitai_primary_file',
                 'thumbnail', 'filename', 'model_url_or_id', 'model_version_id', 'model_type',
-                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload'
+                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload',
+                'download_engine', 'expected_hashes'
             ]
             missing_keys = [key for key in required_for_retry if key not in retry_info or retry_info[key] is None and key not in ('api_key', 'custom_filename', 'custom_download_path', 'civitai_domain')]
             #if missing_keys:

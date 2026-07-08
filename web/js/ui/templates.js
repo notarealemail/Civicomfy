@@ -4,6 +4,7 @@
 export function modalTemplate(settings = {}) {
   const numConnections = Number.isFinite(settings.numConnections) ? settings.numConnections : 1;
   const civitaiDomain = settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+  const downloadEngine = ['auto', 'builtin', 'aria2'].includes(settings.downloadEngine) ? settings.downloadEngine : 'auto';
   return `
     <div class="civitai-downloader-modal-content">
       <div class="civitai-downloader-header">
@@ -59,8 +60,8 @@ export function modalTemplate(settings = {}) {
               </div>
               <div class="civitai-form-group">
                 <label for="civitai-connections">Connections</label>
-                <input type="number" id="civitai-connections" class="civitai-input" value="${numConnections}" min="1" max="16" step="1" required disabled>
-                <p style="font-size: 0.9em; color: #ccc; margin-top: 7px; margin-bottom: 15px;">Disabled: Only single connection possible for now</p>
+                <input type="number" id="civitai-connections" class="civitai-input" value="${numConnections}" min="1" max="16" step="1" required>
+                <p style="font-size: 0.9em; color: #ccc; margin-top: 7px; margin-bottom: 15px;">Used by aria2 when the server and file support ranged downloads.</p>
               </div>
             </div>
             <div class="civitai-form-group inline">
@@ -148,9 +149,18 @@ export function modalTemplate(settings = {}) {
                   </div>
                 </div>
                 <div class="civitai-form-group">
+                  <label for="civitai-settings-download-engine">Download Engine</label>
+                  <select id="civitai-settings-download-engine" class="civitai-select">
+                    <option value="auto" ${downloadEngine === 'auto' ? 'selected' : ''}>Auto (aria2 when available)</option>
+                    <option value="builtin" ${downloadEngine === 'builtin' ? 'selected' : ''}>Built-in</option>
+                    <option value="aria2" ${downloadEngine === 'aria2' ? 'selected' : ''}>aria2</option>
+                  </select>
+                  <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Auto uses <code>aria2c</code> for large ranged downloads when it is installed, then falls back to the built-in downloader.</p>
+                </div>
+                <div class="civitai-form-group">
                   <label for="civitai-settings-connections">Default Connections</label>
-                  <input type="number" id="civitai-settings-connections" class="civitai-input" value="1" min="1" max="16" step="1" required disabled>
-                  <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Disabled. Only single connection possible for now</p>
+                  <input type="number" id="civitai-settings-connections" class="civitai-input" value="${numConnections}" min="1" max="16" step="1" required>
+                  <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Higher values are best used with the aria2 engine. The built-in downloader still falls back safely when ranges are unavailable.</p>
                 </div>
                 <div class="civitai-form-group">
                   <label for="civitai-settings-default-type">Default Model Type (for saving)</label>

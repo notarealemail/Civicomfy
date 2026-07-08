@@ -41,6 +41,8 @@ ComfyUI Manager
 - Optional: enable searching the opposite domain when the selected domain returns no search results.
 - Optional: enable searching the opposite domain when the selected domain returns an error.
 - The Civicomfy panel uses a dark blue theme for `civitai.com` and a dark red theme for `civitai.red`.
+- Optional: choose a download engine: `Auto`, `Built-in`, or `aria2`. `Auto` uses `aria2c` for large ranged downloads when it is installed, then falls back to the built-in downloader.
+- Downloads are checked against Civitai's reported file size and SHA256 hash when that metadata is available.
 - Optional: set a custom download path using variables: `{model_name}`, `{base_model}`, `{model_category}`, and `{model_type}`.
   - Example: `{model_type}/{base_model}/{model_name}`.
 - Optional: set a **Global Download Root** in Civicomfy settings.

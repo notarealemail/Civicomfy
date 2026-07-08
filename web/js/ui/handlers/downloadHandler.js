@@ -83,6 +83,7 @@ export async function handleDownloadSubmit(ui) {
         custom_download_path: customDownloadPath,
         subdir: selectedSubdir,
         num_connections: parseInt(ui.downloadConnectionsInput.value, 10),
+        download_engine: ui.settings.downloadEngine || 'auto',
         force_redownload: ui.forceRedownloadCheckbox.checked,
         api_key: ui.settings.apiKey,
         civitai_domain: getCivitaiDomainForDownload(ui),
