@@ -1,10 +1,19 @@
 // Modal template for Civicomfy UI
 // Keep structure identical to the original inline HTML to minimize risk
 
+function escapeAttribute(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export function modalTemplate(settings = {}) {
   const numConnections = Number.isFinite(settings.numConnections) ? settings.numConnections : 1;
   const civitaiDomain = settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
   const downloadEngine = ['auto', 'builtin', 'aria2'].includes(settings.downloadEngine) ? settings.downloadEngine : 'auto';
+  const aria2Path = escapeAttribute(typeof settings.aria2Path === 'string' ? settings.aria2Path : '');
   return `
     <div class="civitai-downloader-modal-content">
       <div class="civitai-downloader-header">
@@ -156,6 +165,11 @@ export function modalTemplate(settings = {}) {
                     <option value="aria2" ${downloadEngine === 'aria2' ? 'selected' : ''}>aria2</option>
                   </select>
                   <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Auto uses <code>aria2c</code> for large ranged downloads when it is installed, then falls back to the built-in downloader.</p>
+                </div>
+                <div class="civitai-form-group">
+                  <label for="civitai-settings-aria2-path">aria2c Path (Optional)</label>
+                  <input type="text" id="civitai-settings-aria2-path" class="civitai-input" value="${aria2Path}" placeholder="e.g., F:/ComfyUI/custom_nodes/.../aria2c.exe">
+                  <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Leave blank to auto-detect from <code>Civicomfy/vendor/aria2</code>, sibling custom nodes, environment variables, or PATH.</p>
                 </div>
                 <div class="civitai-form-group">
                   <label for="civitai-settings-connections">Default Connections</label>

@@ -146,6 +146,23 @@ class DownloadEngineTests(unittest.TestCase):
         self.assertEqual(downloader_cls._normalize_download_engine("builtin"), "builtin")
         self.assertEqual(downloader_cls._normalize_download_engine("nope"), "auto")
 
+    def test_aria2_path_discovery_accepts_local_executable_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exe_name = "aria2c.exe" if sys.platform.startswith("win") else "aria2c"
+            exe_path = Path(tmpdir) / exe_name
+            exe_path.write_text("", encoding="utf-8")
+
+            downloader = chunk_downloader.ChunkDownloader(
+                "https://civitai.com/api/download/models/1",
+                str(Path(tmpdir) / "model.safetensors"),
+                aria2_path=str(exe_path),
+            )
+            self.assertEqual(Path(downloader._find_aria2c_path()), exe_path)
+
+            bad_path = Path(tmpdir) / "not-aria2.exe"
+            bad_path.write_text("", encoding="utf-8")
+            self.assertFalse(chunk_downloader.ChunkDownloader._is_valid_aria2_executable(bad_path))
+
     def test_final_file_validation_uses_sha256(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "model.safetensors"

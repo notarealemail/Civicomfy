@@ -7,6 +7,7 @@ export function getDefaultSettings() {
     return {
         apiKey: '',
         downloadEngine: 'auto',
+        aria2Path: '',
         numConnections: 1,
         defaultModelType: 'checkpoints',
         autoOpenStatusTab: true,
@@ -61,6 +62,9 @@ export function applySettings(ui) {
     }
     if (ui.settingsDownloadEngineSelect) {
         ui.settingsDownloadEngineSelect.value = ['auto', 'builtin', 'aria2'].includes(ui.settings.downloadEngine) ? ui.settings.downloadEngine : 'auto';
+    }
+    if (ui.settingsAria2PathInput) {
+        ui.settingsAria2PathInput.value = ui.settings.aria2Path || '';
     }
     if (ui.settingsDefaultTypeSelect) {
         const desired = ui.settings.defaultModelType || 'checkpoints';
@@ -166,6 +170,7 @@ export async function handleClearGlobalRoot(ui) {
 export function handleSettingsSave(ui) {
     const apiKey = ui.settingsApiKeyInput.value.trim();
     const downloadEngine = ['auto', 'builtin', 'aria2'].includes(ui.settingsDownloadEngineSelect?.value) ? ui.settingsDownloadEngineSelect.value : 'auto';
+    const aria2Path = ui.settingsAria2PathInput?.value.trim() || '';
     const numConnections = parseInt(ui.settingsConnectionsInput.value, 10);
     const defaultModelType = ui.settingsDefaultTypeSelect.value;
     const autoOpenStatusTab = ui.settingsAutoOpenCheckbox.checked;
@@ -187,6 +192,7 @@ export function handleSettingsSave(ui) {
 
     ui.settings.apiKey = apiKey;
     ui.settings.downloadEngine = downloadEngine;
+    ui.settings.aria2Path = aria2Path;
     ui.settings.numConnections = numConnections;
     ui.settings.defaultModelType = defaultModelType;
     ui.settings.autoOpenStatusTab = autoOpenStatusTab;

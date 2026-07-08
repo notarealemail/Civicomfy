@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 # Import config values
 from ..config import DEFAULT_CHUNK_SIZE, DOWNLOAD_TIMEOUT, HEAD_REQUEST_TIMEOUT
+from ..config import PLUGIN_ROOT
 
 class ChunkDownloader:
     """Handles downloading files in chunks using multiple connections or fallback."""
@@ -32,7 +33,8 @@ class ChunkDownloader:
                  chunk_size: int = DEFAULT_CHUNK_SIZE, manager: 'DownloadManager' = None,
                  download_id: str = None, api_key: Optional[str] = None,
                  known_size: Optional[int] = None, download_engine: str = "auto",
-                 expected_hashes: Optional[Dict[str, str]] = None):
+                 expected_hashes: Optional[Dict[str, str]] = None,
+                 aria2_path: Optional[str] = None):
         # URLs
         self.initial_url = url
         self.url = url
@@ -50,6 +52,7 @@ class ChunkDownloader:
         self.known_size = known_size if known_size and known_size > 0 else None
         self.download_engine = self._normalize_download_engine(download_engine)
         self.expected_hashes = expected_hashes or {}
+        self.aria2_path = aria2_path.strip() if isinstance(aria2_path, str) else ""
         
         # Download state
         self.total_size = self.known_size or 0
@@ -76,6 +79,41 @@ class ChunkDownloader:
             return "auto"
         value = download_engine.strip().lower()
         return value if value in {"auto", "builtin", "aria2"} else "auto"
+
+    @staticmethod
+    def _is_valid_aria2_executable(path: Union[str, os.PathLike]) -> bool:
+        try:
+            candidate = Path(path)
+            if not candidate.is_file():
+                return False
+            return candidate.name.lower() in {"aria2c", "aria2c.exe"}
+        except Exception:
+            return False
+
+    def _find_aria2c_path(self) -> Optional[str]:
+        """Find aria2c from settings, env, common ComfyUI vendor paths, or PATH."""
+        env_path = os.environ.get("CIVICOMFY_ARIA2C_PATH") or os.environ.get("CIVICOMFY_ARIA2C")
+        custom_nodes_dir = Path(PLUGIN_ROOT).parent
+        exe_name = "aria2c.exe" if os.name == "nt" else "aria2c"
+
+        candidates = [
+            self.aria2_path,
+            env_path,
+            Path(PLUGIN_ROOT) / "vendor" / "aria2" / exe_name,
+            Path(PLUGIN_ROOT) / "vendor" / exe_name,
+            Path(PLUGIN_ROOT) / exe_name,
+            custom_nodes_dir / "aria2" / exe_name,
+            custom_nodes_dir / "ComfyUI-UmeAiRT-Toolkit" / "vendor" / "aria2" / exe_name,
+        ]
+
+        for candidate in candidates:
+            if candidate and self._is_valid_aria2_executable(candidate):
+                return str(Path(candidate))
+
+        path_hit = shutil.which("aria2c")
+        if path_hit and self._is_valid_aria2_executable(path_hit):
+            return path_hit
+        return None
 
     def _get_request_headers(self, add_range: Optional[str] = None) -> Dict[str, str]:
         """Constructs request headers with optional auth and range."""
@@ -444,12 +482,12 @@ class ChunkDownloader:
                 response.close()
 
     def _aria2_available(self) -> bool:
-        return shutil.which("aria2c") is not None
+        return self._find_aria2c_path() is not None
 
     def _do_aria2_download(self, supports_ranges: bool) -> bool:
-        aria2_path = shutil.which("aria2c")
+        aria2_path = self._find_aria2c_path()
         if not aria2_path:
-            self.error = "aria2c was selected but was not found on PATH."
+            self.error = "aria2c was selected but was not found. Set an aria2c path, add it to PATH, or place it under Civicomfy/vendor/aria2/."
             print(f"[Downloader {self.download_id}] Error: {self.error}")
             return False
 

@@ -103,6 +103,7 @@ export class CivitaiDownloaderUI {
         this.settingsSetGlobalRootButton = this.modal.querySelector('#civitai-settings-set-global-root');
         this.settingsClearGlobalRootButton = this.modal.querySelector('#civitai-settings-clear-global-root');
         this.settingsDownloadEngineSelect = this.modal.querySelector('#civitai-settings-download-engine');
+        this.settingsAria2PathInput = this.modal.querySelector('#civitai-settings-aria2-path');
         this.settingsConnectionsInput = this.modal.querySelector('#civitai-settings-connections');
         this.settingsDefaultTypeSelect = this.modal.querySelector('#civitai-settings-default-type');
         this.settingsCustomPathInput = this.modal.querySelector('#civitai-settings-custom-path');

@@ -41,7 +41,9 @@ ComfyUI Manager
 - Optional: enable searching the opposite domain when the selected domain returns no search results.
 - Optional: enable searching the opposite domain when the selected domain returns an error.
 - The Civicomfy panel uses a dark blue theme for `civitai.com` and a dark red theme for `civitai.red`.
-- Optional: choose a download engine: `Auto`, `Built-in`, or `aria2`. `Auto` uses `aria2c` for large ranged downloads when it is installed, then falls back to the built-in downloader.
+- Optional: choose a download engine: `Auto`, `Built-in`, or `aria2`. `Auto` uses `aria2c` for large ranged downloads when it is installed or configured, then falls back to the built-in downloader.
+  - `aria2c` can be installed globally, placed at `custom_nodes/Civicomfy/vendor/aria2/aria2c.exe`, discovered from a sibling custom node vendor folder, configured with `CIVICOMFY_ARIA2C_PATH`, or set in Civicomfy settings with an explicit path.
+  - Python aria2 libraries are wrappers around the `aria2c` executable/RPC service; Civicomfy calls the executable directly.
 - Downloads are checked against Civitai's reported file size and SHA256 hash when that metadata is available.
 - Optional: set a custom download path using variables: `{model_name}`, `{base_model}`, `{model_category}`, and `{model_type}`.
   - Example: `{model_type}/{base_model}/{model_name}`.

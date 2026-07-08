@@ -48,6 +48,7 @@ async def route_download_model(request):
         download_engine = str(data.get("download_engine", "auto")).strip().lower()
         if download_engine not in ("auto", "builtin", "aria2"):
             download_engine = "auto"
+        aria2_path = str(data.get("aria2_path", "") or "").strip()
         force_redownload = bool(data.get("force_redownload", False))
         resolved_api_key = resolve_civitai_api_key(data)
         civitai_domain = resolve_civitai_domain(data)
@@ -338,6 +339,7 @@ async def route_download_model(request):
             "output_path": output_path,
             "num_connections": num_connections,
             "download_engine": download_engine,
+            "aria2_path": aria2_path,
             "known_size": known_size_bytes,
             "expected_hashes": expected_hashes,
             "api_key": resolved_api_key, # Pass API key for download auth if needed
