@@ -90,7 +90,10 @@ export function setupEventListeners(ui) {
     }
 
     // Download form inputs
-    ui.modelUrlInput.addEventListener('input', () => ui.debounceFetchDownloadPreview());
+    ui.modelUrlInput.addEventListener('input', () => {
+        ui.downloadDomainOverride = null;
+        ui.debounceFetchDownloadPreview();
+    });
     ui.modelUrlInput.addEventListener('paste', () => ui.debounceFetchDownloadPreview(0));
     ui.modelVersionIdInput.addEventListener('blur', () => ui.fetchAndDisplayDownloadPreview());
 
@@ -190,7 +193,7 @@ export function setupEventListeners(ui) {
         const downloadButton = event.target.closest('.civitai-search-download-button');
         if (downloadButton) {
             event.preventDefault();
-            const { modelId, versionId, modelType } = downloadButton.dataset;
+            const { modelId, versionId, modelType, sourceDomain } = downloadButton.dataset;
             if (!modelId || !versionId) {
                 ui.showToast("Error: Missing data for download.", "error");
                 return;
@@ -202,9 +205,10 @@ export function setupEventListeners(ui) {
             ui.customFilenameInput.value = '';
             ui.forceRedownloadCheckbox.checked = false;
             ui.downloadModelTypeSelect.value = modelTypeInternalKey;
+            ui.downloadDomainOverride = sourceDomain || ui.settings.civitaiDomain || 'civitai.com';
 
             ui.switchTab('download');
-            ui.showToast(`Filled download form for Model ID ${modelId}.`, 'info', 4000);
+            ui.showToast(`Filled download form for Model ID ${modelId} from ${ui.downloadDomainOverride}.`, 'info', 4000);
             ui.fetchAndDisplayDownloadPreview();
             return;
         }

@@ -227,7 +227,9 @@ def parse_civitai_input(url_or_id: str) -> tuple[int | None, int | None]:
                  return None, None
 
         # Check domain if it was present
-        if parsed_url.netloc and "civitai.com" not in parsed_url.netloc.lower():
+        allowed_domains = ("civitai.com", "civitai.red")
+        parsed_host = parsed_url.netloc.lower().split("@")[-1].split(":")[0]
+        if parsed_host and not any(parsed_host == domain or parsed_host.endswith(f".{domain}") for domain in allowed_domains):
             print(f"Input URL '{url_or_id}' is not a Civitai URL.")
             return None, None
 

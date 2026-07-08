@@ -3,6 +3,33 @@
 
 const PLACEHOLDER_IMAGE_URL = `/extensions/Civicomfy/images/placeholder.jpeg`;
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+function safeDomain(value, fallback = 'civitai.com') {
+  return ['civitai.com', 'civitai.red'].includes(value) ? value : fallback;
+}
+
+function safeUrl(value, fallback) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (!['http:', 'https:'].includes(parsed.protocol) && parsed.origin !== window.location.origin) {
+      return fallback;
+    }
+    return parsed.href;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 export function renderSearchResults(ui, items) {
   ui.feedback?.ensureFontAwesome();
 
@@ -28,11 +55,12 @@ export function renderSearchResults(ui, items) {
     const creator = hit.user?.username || 'Unknown Creator';
     const modelName = hit.name || 'Untitled Model';
     const modelTypeApi = hit.type || 'other';
+    const sourceDomain = safeDomain(hit.sourceDomain, safeDomain(ui.settings?.civitaiDomain));
     console.log('Model type for badge:', modelTypeApi);
     const stats = hit.metrics || {};
-    const tags = hit.tags?.map(t => t.name) || [];
+    const tags = hit.tags?.map(t => t.name).filter(Boolean) || [];
 
-    const thumbnailUrl = hit.thumbnailUrl || placeholder;
+    const thumbnailUrl = safeUrl(hit.thumbnailUrl, placeholder);
     const firstImage = Array.isArray(hit.images) && hit.images.length > 0 ? hit.images[0] : null;
     const thumbnailType = firstImage?.type;
     const nsfwLevel = Number(firstImage?.nsfwLevel ?? hit.nsfwLevel ?? 0);
@@ -43,11 +71,17 @@ export function renderSearchResults(ui, items) {
     const primaryVersion = hit.version || (allVersions.length > 0 ? allVersions[0] : {});
     const primaryVersionId = primaryVersion.id;
     const primaryBaseModel = primaryVersion.baseModel || 'N/A';
+    const safeModelId = encodeURIComponent(String(modelId));
+    const safeModelTypeApi = escapeHtml(modelTypeApi);
+    const safeModelTypeAttr = escapeHtml(String(modelTypeApi || '').toLowerCase());
+    const safeCreator = escapeHtml(creator);
+    const safeModelName = escapeHtml(modelName);
 
     const uniqueBaseModels = allVersions.length > 0
       ? [...new Set(allVersions.map(v => v.baseModel).filter(Boolean))]
       : (primaryBaseModel !== 'N/A' ? [primaryBaseModel] : []);
     const baseModelsDisplay = uniqueBaseModels.length > 0 ? uniqueBaseModels.join(', ') : 'N/A';
+    const safeBaseModelsDisplay = escapeHtml(baseModelsDisplay);
 
     const publishedAt = hit.publishedAt;
     let lastUpdatedFormatted = 'N/A';
@@ -60,7 +94,7 @@ export function renderSearchResults(ui, items) {
 
     const listItem = document.createElement('div');
     listItem.className = 'civitai-search-item';
-    listItem.dataset.modelId = modelId;
+    listItem.dataset.modelId = String(modelId);
 
     const MAX_VISIBLE_VERSIONS = 3;
     let visibleVersions = [];
@@ -75,13 +109,15 @@ export function renderSearchResults(ui, items) {
       const versionId = version.id;
       const versionName = version.name || 'Unknown Version';
       const baseModel = version.baseModel || 'N/A';
+      const safeVersionId = versionId ? escapeHtml(versionId) : '';
       return `
         <button class="civitai-button primary small civitai-search-download-button"
-                data-model-id="${modelId}"
-                data-version-id="${versionId || ''}"
-                data-model-type="${modelTypeApi || ''}"
+                data-model-id="${escapeHtml(modelId)}"
+                data-version-id="${safeVersionId}"
+                data-model-type="${escapeHtml(modelTypeApi || '')}"
+                data-source-domain="${sourceDomain}"
                 ${!versionId ? 'disabled title="Version ID missing, cannot pre-fill"' : 'title="Pre-fill Download Tab"'} >
-          <span class="base-model-badge">${baseModel}</span> ${versionName} <i class="fas fa-download"></i>
+          <span class="base-model-badge">${escapeHtml(baseModel)}</span> ${escapeHtml(versionName)} <i class="fas fa-download"></i>
         </button>
       `;
     }).join('');
@@ -108,11 +144,12 @@ export function renderSearchResults(ui, items) {
             const baseModel = version.baseModel || 'N/A';
             return `
               <button class="civitai-button primary small civitai-search-download-button"
-                      data-model-id="${modelId}"
-                      data-version-id="${versionId || ''}"
-                      data-model-type="${modelTypeApi || ''}"
+                      data-model-id="${escapeHtml(modelId)}"
+                      data-version-id="${versionId ? escapeHtml(versionId) : ''}"
+                      data-model-type="${escapeHtml(modelTypeApi || '')}"
+                      data-source-domain="${sourceDomain}"
                       ${!versionId ? 'disabled title="Version ID missing, cannot pre-fill"' : 'title="Pre-fill Download Tab"'} >
-                <span class="base-model-badge">${baseModel}</span> ${versionName} <i class="fas fa-download"></i>
+                <span class="base-model-badge">${escapeHtml(baseModel)}</span> ${escapeHtml(versionName)} <i class="fas fa-download"></i>
               </button>
             `;
           }).join('')}
@@ -126,7 +163,7 @@ export function renderSearchResults(ui, items) {
     if (thumbnailUrl && typeof thumbnailUrl === 'string' && thumbnailType === 'video') {
       thumbnailHtml = `
         <video class="civitai-search-thumbnail" src="${thumbnailUrl}" autoplay loop muted playsinline
-               title="${videoTitle}"
+               title="${escapeHtml(videoTitle)}"
                onerror="console.error('Failed to load video preview:', this.src)">
           Your browser does not support the video tag.
         </video>
@@ -134,7 +171,7 @@ export function renderSearchResults(ui, items) {
     } else {
       const effective = thumbnailUrl || placeholder;
       thumbnailHtml = `
-        <img src="${effective}" alt="${imageAlt}" class="civitai-search-thumbnail" loading="lazy" onerror="${onErrorScript}">
+        <img src="${effective}" alt="${escapeHtml(imageAlt)}" class="civitai-search-thumbnail" loading="lazy" onerror="${onErrorScript}">
       `;
     }
 
@@ -145,14 +182,14 @@ export function renderSearchResults(ui, items) {
       <div class="${containerClasses}" data-nsfw-level="${nsfwLevel ?? ''}">
         ${thumbnailHtml}
         ${overlayHtml}
-        <div class="civitai-type-badge" data-type="${modelTypeApi.toLowerCase()}">${modelTypeApi}</div>
+        <div class="civitai-type-badge" data-type="${safeModelTypeAttr}">${safeModelTypeApi}</div>
       </div>
       <div class="civitai-search-info">
-        <h4>${modelName}</h4>
+        <h4>${safeModelName}<span class="civitai-source-domain-badge">${escapeHtml(sourceDomain)}</span></h4>
         <div class="civitai-search-meta-info">
-          <span title="Creator: ${creator}"><i class="fas fa-user"></i> ${creator}</span>
-          <span title="Base Models: ${baseModelsDisplay}"><i class="fas fa-layer-group"></i> ${baseModelsDisplay}</span>
-          <span title="Published: ${lastUpdatedFormatted}"><i class="fas fa-calendar-alt"></i> ${lastUpdatedFormatted}</span>
+          <span title="Creator: ${safeCreator}"><i class="fas fa-user"></i> ${safeCreator}</span>
+          <span title="Base Models: ${safeBaseModelsDisplay}"><i class="fas fa-layer-group"></i> ${safeBaseModelsDisplay}</span>
+          <span title="Published: ${escapeHtml(lastUpdatedFormatted)}"><i class="fas fa-calendar-alt"></i> ${escapeHtml(lastUpdatedFormatted)}</span>
         </div>
         <div class="civitai-search-stats" title="Stats: Downloads / Rating (Count) / Likes">
           <span title="Downloads"><i class="fas fa-download"></i> ${stats.downloadCount?.toLocaleString() || 0}</span>
@@ -161,16 +198,16 @@ export function renderSearchResults(ui, items) {
           <span title="Buzz"><i class="fas fa-bolt"></i> ${stats.tippedAmountCount?.toLocaleString() || 0}</span>
         </div>
         ${tags.length > 0 ? `
-        <div class="civitai-search-tags" title="${tags.join(', ')}">
-          ${tags.slice(0, 5).map(tag => `<span class="civitai-search-tag">${tag}</span>`).join('')}
+        <div class="civitai-search-tags" title="${escapeHtml(tags.join(', '))}">
+          ${tags.slice(0, 5).map(tag => `<span class="civitai-search-tag">${escapeHtml(tag)}</span>`).join('')}
           ${tags.length > 5 ? `<span class="civitai-search-tag">...</span>` : ''}
         </div>
         ` : ''}
       </div>
       <div class="civitai-search-actions">
-        <a href="https://civitai.com/models/${modelId}${primaryVersionId ? '?modelVersionId='+primaryVersionId : ''}" 
+        <a href="https://${sourceDomain}/models/${safeModelId}${primaryVersionId ? '?modelVersionId='+encodeURIComponent(String(primaryVersionId)) : ''}"
            target="_blank" rel="noopener noreferrer" class="civitai-button small" 
-           title="Open on Civitai website">
+           title="Open on ${sourceDomain}">
           View <i class="fas fa-external-link-alt"></i>
         </a>
         <div class="version-buttons-container">

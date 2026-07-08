@@ -74,7 +74,7 @@ class DownloadManager:
                 'url', 'output_path', 'num_connections', 'api_key', 'known_size',
                 'civitai_model_info', 'civitai_version_info', 'civitai_primary_file',
                 'thumbnail', 'filename', 'model_url_or_id', 'model_version_id', 'model_type',
-                'custom_filename', 'force_redownload' # Add force_redownload too
+                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload'
             ]
             for key in required_for_retry:
                 if key not in download_info:
@@ -717,9 +717,9 @@ class DownloadManager:
                 'url', 'output_path', 'num_connections', 'api_key', 'known_size',
                 'civitai_model_info', 'civitai_version_info', 'civitai_primary_file',
                 'thumbnail', 'filename', 'model_url_or_id', 'model_version_id', 'model_type',
-                'custom_filename', 'force_redownload'
+                'custom_filename', 'custom_download_path', 'civitai_domain', 'force_redownload'
             ]
-            missing_keys = [key for key in required_for_retry if key not in retry_info or retry_info[key] is None and key != 'api_key' and key != 'custom_filename'] # Allow api_key/custom_filename to be None
+            missing_keys = [key for key in required_for_retry if key not in retry_info or retry_info[key] is None and key not in ('api_key', 'custom_filename', 'custom_download_path', 'civitai_domain')]
             #if missing_keys:
             #    return {"success": False, "error": f"Cannot retry: Original download data is missing required fields: {', '.join(missing_keys)}"}
 

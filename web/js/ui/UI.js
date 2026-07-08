@@ -32,6 +32,7 @@ export class CivitaiDownloaderUI {
         this.baseModels = [];
         this.searchPagination = { currentPage: 1, totalPages: 1, limit: 20 };
         this.settings = this.getDefaultSettings();
+        this.downloadDomainOverride = null;
         this.toastTimeout = null;
         this.modelPreviewDebounceTimeout = null;
 
@@ -67,6 +68,7 @@ export class CivitaiDownloaderUI {
         this.subdirSelect = this.modal.querySelector('#civitai-subdir-select');
         this.createSubdirButton = this.modal.querySelector('#civitai-create-subdir');
         this.saveBasePathHint = this.modal.querySelector('#civitai-save-base-path');
+        this.customDownloadPathInput = this.modal.querySelector('#civitai-custom-download-path');
         this.downloadConnectionsInput = this.modal.querySelector('#civitai-connections');
         this.forceRedownloadCheckbox = this.modal.querySelector('#civitai-force-redownload');
         this.downloadSubmitButton = this.modal.querySelector('#civitai-download-submit');
@@ -102,9 +104,13 @@ export class CivitaiDownloaderUI {
         this.settingsClearGlobalRootButton = this.modal.querySelector('#civitai-settings-clear-global-root');
         this.settingsConnectionsInput = this.modal.querySelector('#civitai-settings-connections');
         this.settingsDefaultTypeSelect = this.modal.querySelector('#civitai-settings-default-type');
+        this.settingsCustomPathInput = this.modal.querySelector('#civitai-settings-custom-path');
         this.settingsAutoOpenCheckbox = this.modal.querySelector('#civitai-settings-auto-open-status');
         this.settingsHideMatureCheckbox = this.modal.querySelector('#civitai-settings-hide-mature');
         this.settingsNsfwThresholdInput = this.modal.querySelector('#civitai-settings-nsfw-threshold');
+        this.settingsDomainSelect = this.modal.querySelector('#civitai-settings-domain');
+        this.settingsSearchOppositeCheckbox = this.modal.querySelector('#civitai-settings-search-opposite');
+        this.settingsSearchOppositeErrorCheckbox = this.modal.querySelector('#civitai-settings-search-opposite-error');
         this.settingsSaveButton = this.modal.querySelector('#civitai-settings-save');
 
         // Toast Notification
@@ -299,6 +305,20 @@ export class CivitaiDownloaderUI {
 
     ensureFontAwesome() {
         this.feedback?.ensureFontAwesome();
+    }
+
+    applyDomainTheme() {
+        if (!this.modal) return;
+        const domain = this.settings?.civitaiDomain === 'civitai.red' ? 'red' : 'com';
+        this.modal.classList.toggle('civitai-domain-red', domain === 'red');
+        this.modal.classList.toggle('civitai-domain-com', domain === 'com');
+
+        const button = document.getElementById('civitai-downloader-button');
+        if (button) {
+            button.classList.toggle('civitai-domain-red', domain === 'red');
+            button.classList.toggle('civitai-domain-com', domain === 'com');
+            button.title = `Open Civicomfy (${this.settings?.civitaiDomain || 'civitai.com'})`;
+        }
     }
 
     // --- Rendering (delegated to external renderers) ---

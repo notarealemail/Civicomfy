@@ -15,6 +15,9 @@ export async function handleSearchSubmit(ui) {
         limit: ui.searchPagination.limit,
         page: ui.searchPagination.currentPage,
         api_key: ui.settings.apiKey,
+        civitai_domain: ui.settings.civitaiDomain,
+        search_opposite_on_empty: ui.settings.searchOppositeOnEmpty === true,
+        search_opposite_on_error: ui.settings.searchOppositeOnError === true,
     };
 
     try {
@@ -25,6 +28,13 @@ export async function handleSearchSubmit(ui) {
         }
 
         ui.renderSearchResults(response.items);
+        if (response.metadata?.fallbackFromDomain && response.metadata?.sourceDomain) {
+            const notice = document.createElement('p');
+            notice.className = 'civitai-search-domain-notice';
+            const reason = response.metadata.fallbackReason === 'error' ? 'Search errored' : 'No results';
+            notice.textContent = `${reason} on ${response.metadata.fallbackFromDomain}; showing results from ${response.metadata.sourceDomain}.`;
+            ui.searchResultsContainer.prepend(notice);
+        }
         ui.renderSearchPagination(response.metadata);
 
     } catch (error) {

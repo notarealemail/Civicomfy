@@ -7,16 +7,34 @@ from typing import List, Optional, Dict, Any, Union
 
 class CivitaiAPI:
     """Simple wrapper for interacting with the Civitai API v1."""
-    BASE_URL = "https://civitai.com/api/v1"
+    DEFAULT_DOMAIN = "civitai.com"
+    ALLOWED_DOMAINS = ("civitai.com", "civitai.red")
+    MEILI_TOKEN = "8c46eb2508e21db1e9828a97968d91ab1ca1caa5f70a00e88a2ba1e286603b61"
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, domain: Optional[str] = None):
         self.api_key = api_key
+        self.domain = self.normalize_domain(domain)
+        self.base_url = f"https://{self.domain}/api/v1"
+        self.search_url = "https://search.civitai.com/multi-search"
+        self.image_base_url = "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7QA"
         self.base_headers = {'Content-Type': 'application/json'}
         if api_key:
             self.base_headers["Authorization"] = f"Bearer {api_key}"
-            print("[Civitai API] Using API Key.")
+            print(f"[Civitai API] Using API Key for {self.domain}.")
         else:
-            print("[Civitai API] No API Key provided.")
+            print(f"[Civitai API] No API Key provided for {self.domain}.")
+
+    @classmethod
+    def normalize_domain(cls, domain: Optional[str]) -> str:
+        """Return a supported Civitai domain, defaulting safely to civitai.com."""
+        value = (domain or cls.DEFAULT_DOMAIN).strip().lower()
+        value = value.removeprefix("https://").removeprefix("http://").strip("/")
+        return value if value in cls.ALLOWED_DOMAINS else cls.DEFAULT_DOMAIN
+
+    @classmethod
+    def opposite_domain(cls, domain: Optional[str]) -> str:
+        normalized = cls.normalize_domain(domain)
+        return "civitai.red" if normalized == "civitai.com" else "civitai.com"
 
     def _get_request_headers(self, method: str, has_json_data: bool) -> Dict[str, str]:
         """Returns headers for a specific request."""
@@ -30,7 +48,7 @@ class CivitaiAPI:
                  json_data: Optional[Dict] = None, stream: bool = False,
                  allow_redirects: bool = True, timeout: int = 30) -> Union[Dict[str, Any], requests.Response, None]:
         """Makes a request to the Civitai API and handles basic errors."""
-        url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
         request_headers = self._get_request_headers(method, json_data is not None)
 
         try:
@@ -93,7 +111,63 @@ class CivitaiAPI:
             return result
         return result
 
+    def get_model_details_trpc(self, model_id: int) -> Optional[Dict[str, Any]]:
+        """Gets detailed model information, including category tags when available."""
+        trpc_url = f"https://{self.domain}/api/trpc/model.getById"
+        params = {
+            "input": json.dumps({"json": {"id": model_id, "authed": bool(self.api_key)}})
+        }
+        request_headers = self._get_request_headers("GET", False)
+
+        try:
+            response = requests.get(trpc_url, params=params, headers=request_headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            result_data = data.get("result", {}).get("data", {}) if isinstance(data, dict) else {}
+            if isinstance(result_data, dict) and isinstance(result_data.get("json"), dict):
+                return result_data["json"]
+
+            print(f"Warning: Unexpected TRPC response structure: {data}")
+            return None
+
+        except requests.exceptions.HTTPError as http_err:
+            error_detail = None
+            status_code = http_err.response.status_code
+            try:
+                error_detail = http_err.response.json()
+            except json.JSONDecodeError:
+                error_detail = http_err.response.text[:200]
+            print(f"Civitai TRPC HTTP Error ({trpc_url}): Status {status_code}, Response: {error_detail}")
+            return {"error": f"TRPC HTTP Error: {status_code}", "details": error_detail, "status_code": status_code}
+
+        except requests.exceptions.RequestException as req_err:
+            print(f"Civitai TRPC Request Error ({trpc_url}): {req_err}")
+            return {"error": str(req_err), "details": None, "status_code": None}
+
+        except json.JSONDecodeError as json_err:
+            print(f"Civitai TRPC Error: Failed to decode JSON response from {trpc_url}: {json_err}")
+            response_text = response.text[:200] if hasattr(response, 'text') else "N/A"
+            return {"error": "Invalid JSON response from TRPC", "details": response_text, "status_code": response.status_code if hasattr(response, 'status_code') else None}
+
+    def extract_model_category(self, trpc_data: Dict[str, Any]) -> Optional[str]:
+        """Extracts the first Civitai category tag from TRPC model data."""
+        if not isinstance(trpc_data, dict):
+            return None
+
+        tags_on_models = trpc_data.get("tagsOnModels", [])
+        if not isinstance(tags_on_models, list):
+            return None
+
+        for tag_entry in tags_on_models:
+            tag = tag_entry.get("tag") if isinstance(tag_entry, dict) else None
+            if isinstance(tag, dict) and tag.get("isCategory") is True:
+                return tag.get("name")
+
+        return None
+
     def search_models(self, query: str, types: Optional[List[str]] = None,
+                      base_models: Optional[List[str]] = None,
                       sort: str = 'Highest Rated', period: str = 'AllTime',
                       limit: int = 20, page: int = 1,
                       nsfw: Optional[bool] = None) -> Optional[Dict[str, Any]]:
@@ -110,6 +184,8 @@ class CivitaiAPI:
             # `requests` handles lists by appending multiple key=value pairs,
             # which matches the expectation for 'array' type in the API doc.
              params["types"] = types
+        if base_models:
+            params["baseModels"] = base_models
         if nsfw is not None:
             params["nsfw"] = str(nsfw).lower() # API expects string "true" or "false"
 
@@ -123,6 +199,40 @@ class CivitaiAPI:
              print(f"Warning: Unexpected search result format: {result}")
              # Return a consistent empty structure on unexpected format
              return {"items": [], "metadata": {"totalItems": 0, "currentPage": page, "pageSize": limit, "totalPages": 0}}
+
+    def search_models_catalog(self, query: str, types: Optional[List[str]] = None,
+                              base_models: Optional[List[str]] = None,
+                              sort: str = 'Most Downloaded',
+                              limit: int = 20, page: int = 1,
+                              nsfw: Optional[bool] = None) -> Optional[Dict[str, Any]]:
+        """Search using the best available endpoint for the selected domain."""
+        if self.domain == "civitai.red":
+            result = self.search_models(
+                query=query or "",
+                types=types,
+                base_models=base_models,
+                sort=sort,
+                period="AllTime",
+                limit=limit,
+                page=page,
+                nsfw=nsfw
+            )
+            if isinstance(result, dict) and "error" not in result:
+                result["searchBackend"] = "rest"
+            return result
+
+        result = self.search_models_meili(
+            query=query,
+            types=types,
+            base_models=base_models,
+            sort=sort,
+            limit=limit,
+            page=page,
+            nsfw=nsfw
+        )
+        if isinstance(result, dict) and "error" not in result:
+            result["searchBackend"] = "meili"
+        return result
         
     def search_models_meili(self, query: str, types: Optional[List[str]] = None,
                             base_models: Optional[List[str]] = None,
@@ -130,9 +240,9 @@ class CivitaiAPI:
                             limit: int = 20, page: int = 1,
                             nsfw: Optional[bool] = None) -> Optional[Dict[str, Any]]:
         """Searches models using the Civitai Meilisearch endpoint."""
-        meili_url = "https://search.civitai.com/multi-search"
+        meili_url = self.search_url
         headers = {'Content-Type': 'application/json'}
-        headers['Authorization'] = f'Bearer 8c46eb2508e21db1e9828a97968d91ab1ca1caa5f70a00e88a2ba1e286603b61' #Nothing harmful, everyone have the same meilisearch bearer token. I checked with 3 accounts
+        headers['Authorization'] = f'Bearer {self.MEILI_TOKEN}' # Nothing harmful, everyone has the same meilisearch bearer token.
 
         offset = max(0, (page - 1) * limit)
 

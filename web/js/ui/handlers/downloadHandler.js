@@ -1,5 +1,18 @@
 import { CivitaiDownloaderAPI } from "../../api/civitai.js";
 
+function getCivitaiDomainForDownload(ui) {
+    const rawInput = ui.modelUrlInput?.value?.trim() || "";
+    try {
+        const parsed = new URL(rawInput);
+        const host = parsed.hostname.toLowerCase();
+        if (host === "civitai.red" || host.endsWith(".civitai.red")) return "civitai.red";
+        if (host === "civitai.com" || host.endsWith(".civitai.com")) return "civitai.com";
+    } catch (_) {
+        // Plain IDs and paths use the selected/overridden domain below.
+    }
+    return ui.downloadDomainOverride || ui.settings.civitaiDomain || "civitai.com";
+}
+
 export function debounceFetchDownloadPreview(ui, delay = 500) {
     clearTimeout(ui.modelPreviewDebounceTimeout);
     ui.modelPreviewDebounceTimeout = setTimeout(() => {
@@ -22,7 +35,8 @@ export async function fetchAndDisplayDownloadPreview(ui) {
     const params = {
         model_url_or_id: modelUrlOrId,
         model_version_id: versionId ? parseInt(versionId, 10) : null,
-        api_key: ui.settings.apiKey
+        api_key: ui.settings.apiKey,
+        civitai_domain: getCivitaiDomainForDownload(ui),
     };
 
     try {
@@ -59,16 +73,19 @@ export async function handleDownloadSubmit(ui) {
     // Subfolder comes from dropdown; filename is base name only
     const selectedSubdir = ui.subdirSelect ? ui.subdirSelect.value.trim() : '';
     const userFilename = ui.customFilenameInput.value.trim();
+    const customDownloadPath = ui.customDownloadPathInput ? ui.customDownloadPathInput.value.trim() : '';
 
     const params = {
         model_url_or_id: modelUrlOrId,
         model_type: ui.downloadModelTypeSelect.value,
         model_version_id: ui.modelVersionIdInput.value ? parseInt(ui.modelVersionIdInput.value, 10) : null,
         custom_filename: userFilename,
+        custom_download_path: customDownloadPath,
         subdir: selectedSubdir,
         num_connections: parseInt(ui.downloadConnectionsInput.value, 10),
         force_redownload: ui.forceRedownloadCheckbox.checked,
-        api_key: ui.settings.apiKey
+        api_key: ui.settings.apiKey,
+        civitai_domain: getCivitaiDomainForDownload(ui),
     };
 
     const fileSelectEl = ui.modal.querySelector('#civitai-file-select');

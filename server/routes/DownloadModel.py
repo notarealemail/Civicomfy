@@ -8,10 +8,16 @@ import re
 from aiohttp import web
 
 import server # ComfyUI server instance
-from ..utils import get_request_json, resolve_civitai_api_key
+from ..utils import (
+    get_request_json,
+    get_civitai_model_and_version_details,
+    process_custom_download_path,
+    resolve_civitai_api_key,
+    resolve_civitai_domain,
+)
 from ...downloader.manager import manager as download_manager
 from ...api.civitai import CivitaiAPI
-from ...utils.helpers import get_model_dir, parse_civitai_input, sanitize_filename, select_primary_file
+from ...utils.helpers import get_model_dir, sanitize_filename
 from ...config import METADATA_SUFFIX, PREVIEW_SUFFIX
 
 prompt_server = server.PromptServer.instance
@@ -33,6 +39,7 @@ async def route_download_model(request):
         req_version_id = data.get("model_version_id") # Optional explicit version ID
         explicit_save_root = (data.get("save_root") or "").strip()
         custom_filename_input = data.get("custom_filename", "").strip()
+        custom_download_path = data.get("custom_download_path", "").strip()
         selected_subdir = (data.get("subdir") or "").strip()
         # Optional file selection overrides
         req_file_id = data.get("file_id")
@@ -40,116 +47,21 @@ async def route_download_model(request):
         num_connections = int(data.get("num_connections", 4))
         force_redownload = bool(data.get("force_redownload", False))
         resolved_api_key = resolve_civitai_api_key(data)
+        civitai_domain = resolve_civitai_domain(data)
 
         if not model_url_or_id:
             raise web.HTTPBadRequest(reason="Missing 'model_url_or_id'")
 
         # --- Input Parsing and Info Fetching ---
-        print(f"[Server Download] Request: {model_url_or_id}, SaveType: {model_type_value}, Version: {req_version_id}")
+        print(f"[Server Download] Request: {model_url_or_id}, Domain: {civitai_domain}, SaveType: {model_type_value}, Version: {req_version_id}")
         # API key priority: request payload > CIVITAI_API_KEY env var
-        api = CivitaiAPI(resolved_api_key)
-        parsed_model_id, parsed_version_id = parse_civitai_input(model_url_or_id)
-
-        # Determine the target version ID (request param > URL param)
-        target_version_id = None
-        if req_version_id and str(req_version_id).isdigit(): # Check if actually a number
-            try:
-                target_version_id = int(req_version_id)
-            except (ValueError, TypeError):
-                 print(f"[Server Download] Warning: Invalid value provided for 'model_version_id': {req_version_id}. Ignoring.")
-                 # Continue, will try to find latest if no version ID parsed from URL either
-        elif parsed_version_id:
-            target_version_id = parsed_version_id
-        # else: target_version_id remains None, we'll need model_id to find latest
-
-        target_model_id = parsed_model_id
-
-        # --- Get Model/Version Info from Civitai ---
-        # Store results in broader scope vars 'model_info' and 'version_info'
-        if target_version_id:
-            # Fetch version info directly using GET /model-versions/{id}
-            print(f"[Server Download] Fetching info for Version ID: {target_version_id}")
-            version_info_result = api.get_model_version_info(target_version_id)
-            if version_info_result and "error" not in version_info_result:
-                version_info = version_info_result # Assign to broader scope variable
-                # Infer model_id from version info if we didn't have it
-                if not target_model_id and version_info.get('modelId'):
-                     target_model_id = version_info['modelId']
-                     print(f"[Server Download] Inferred Model ID {target_model_id} from Version ID {target_version_id}")
-                     # Fetch model info as well for completeness if we only had version ID initially
-                     model_info_result = api.get_model_info(target_model_id)
-                     if model_info_result and "error" not in model_info_result:
-                         model_info = model_info_result
-                     else:
-                         print(f"[Server Download] Warning: Could not fetch model info ({target_model_id}) after inferring from version.")
-                         model_info = {} # Use empty dict as placeholder
-                else:
-                    model_info_result = api.get_model_info(target_model_id)
-                    if model_info_result and "error" not in model_info_result:
-                         model_info = model_info_result
-                    else:
-                         print(f"[Server Download] Warning: Could not fetch model info ({target_model_id}) after inferring from version.")
-                         model_info = {} # Use empty dict as placeholder
-
-            else:
-                # Handle API error or not found for version ID
-                err_details = version_info_result.get('details') if isinstance(version_info_result, dict) else "Unknown API error"
-                status_code = version_info_result.get('status_code', 500) if isinstance(version_info_result, dict) else 500
-                raise web.HTTPNotFound(reason=f"Civitai API Error: Version {target_version_id} not found or API error. Details: {err_details}",
-                                       body=json.dumps({"error": f"Version {target_version_id} not found or API error", "details": err_details}))
-
-        elif target_model_id:
-             # Fetch model info (GET /models/{id}) to get the latest version
-            print(f"[Server Download] Fetching info for Model ID: {target_model_id} to find latest version.")
-            model_info_result = api.get_model_info(target_model_id)
-            if model_info_result and "error" not in model_info_result:
-                model_info = model_info_result # Assign to broader scope variable
-                versions = model_info.get("modelVersions")
-                if versions and isinstance(versions, list) and len(versions) > 0:
-                    # Find the *best* default version (often marked as 'default' or just the first 'Published')
-                    default_version_in_list = next((v for v in versions if v.get('status') == 'Published'), versions[0])
-                    if not default_version_in_list: # Should not happen if versions exist, but safety check
-                         raise web.HTTPNotFound(reason=f"Model {target_model_id} found, but has no published versions listed.")
-
-                    partial_version_info = default_version_in_list # This is the partial version info dict from the list
-                    target_version_id = partial_version_info.get('id')
-                    if not target_version_id:
-                         raise web.HTTPNotFound(reason=f"Model {target_model_id} found, but latest version has no ID.")
-
-                    print(f"[Server Download] Using latest/default Version ID {target_version_id} for Model ID {target_model_id}")
-                    # Need to re-fetch full version details as model info often lacks file download URLs or full metadata
-                    print(f"[Server Download] Fetching full details for selected Version ID: {target_version_id}")
-                    full_version_info_result = api.get_model_version_info(target_version_id)
-                    if full_version_info_result and "error" not in full_version_info_result:
-                        version_info = full_version_info_result # Overwrite with full details
-                    else:
-                        # Log error but proceed with partial data if possible (will likely fail later if files missing)
-                        err_details = full_version_info_result.get('details') if isinstance(full_version_info_result, dict) else "Unknown error getting full version"
-                        print(f"[Server Download] Warning: Could not fetch full details for version {target_version_id}. Details: {err_details}. Download might fail if file info is missing.")
-                        version_info = partial_version_info # Use the partial info from the model list
-
-                else:
-                    raise web.HTTPNotFound(reason=f"Model {target_model_id} found, but has no usable model versions listed.")
-            else:
-                # Handle API error or not found for model ID
-                err_details = model_info_result.get('details') if isinstance(model_info_result, dict) else "Unknown API error"
-                status_code = model_info_result.get('status_code', 500) if isinstance(model_info_result, dict) else 500
-                raise web.HTTPNotFound(reason=f"Civitai API Error: Model {target_model_id} not found or API error. Details: {err_details}",
-                                       body=json.dumps({"error": f"Model {target_model_id} not found or API error", "details": err_details}))
-
-        else:
-             # Neither model ID nor version ID could be determined
-            raise web.HTTPBadRequest(reason="Invalid input: Could not determine Model ID or Version ID from input.")
-
-        # --- Sanity Checks After Fetching ---
-        if not target_model_id:
-             # This case implies we started with only a version ID and failed to infer the model ID
-             raise web.HTTPInternalServerError(reason="Failed to determine the parent Model ID for the requested version.")
-        if not target_version_id or not version_info:
-             # This implies we started with a model ID but failed to find/fetch a valid version
-             raise web.HTTPInternalServerError(reason="Failed to resolve valid model version information.")
-        # Ensure model_info exists, even if empty (e.g., if started with only version_id and model fetch failed)
-        if model_info is None: model_info = {}
+        api = CivitaiAPI(resolved_api_key, domain=civitai_domain)
+        details = await get_civitai_model_and_version_details(api, model_url_or_id, req_version_id)
+        model_info = details['model_info']
+        version_info = details['version_info']
+        primary_file = details['primary_file']
+        target_model_id = details['target_model_id']
+        target_version_id = details['target_version_id']
 
         # --- Select File and Get Download URL ---
         files = version_info.get("files", [])
@@ -176,7 +88,6 @@ async def route_download_model(request):
              raise web.HTTPNotFound(reason=f"Version ID {target_version_id} ({version_info.get('name', 'N/A')}) has no files listed in API response.")
 
         # If a specific file was requested by ID, honor it first
-        primary_file = None
         if req_file_id is not None:
             try:
                 # IDs in API are ints; accept stringified ints too
@@ -187,8 +98,8 @@ async def route_download_model(request):
             except ValueError:
                 raise web.HTTPBadRequest(reason=f"Invalid 'file_id' value: {req_file_id}")
 
-        # If not selected by ID, try selecting by partial name match (e.g., 'fp16', 'fp8')
-        if primary_file is None and req_file_name_contains:
+        # If requested, try selecting by partial name match (e.g., 'fp16', 'fp8')
+        if req_file_id is None and req_file_name_contains:
             needle = req_file_name_contains.lower()
             def name_matches(f):
                 if not isinstance(f, dict):
@@ -199,11 +110,8 @@ async def route_download_model(request):
                 size_tag = (meta.get("size") or "").lower()
                 return (needle in name) or (needle in fmt) or (needle in size_tag)
             candidates = [f for f in files if f.get('downloadUrl') and name_matches(f)]
-            primary_file = candidates[0] if candidates else None
-
-        # If still not selected, fall back to heuristic helper
-        if primary_file is None:
-            primary_file = select_primary_file(files)
+            if candidates:
+                primary_file = candidates[0]
 
         if not primary_file:
             raise web.HTTPNotFound(reason=f"Could not find any file with a valid download URL for version {target_version_id}.")
@@ -234,6 +142,26 @@ async def route_download_model(request):
             parts = [p for p in norm_sub.split('/') if p and p not in ('.', '..')]
             if parts:
                 sub_path = os.path.join(*[sanitize_filename(p) for p in parts])
+
+        if custom_download_path:
+            model_category = None
+            try:
+                trpc_data = api.get_model_details_trpc(target_model_id)
+                if trpc_data and not (isinstance(trpc_data, dict) and "error" in trpc_data):
+                    model_category = api.extract_model_category(trpc_data)
+            except Exception as category_err:
+                print(f"[Server Download] Warning: Failed to fetch model category: {category_err}")
+
+            processed_path = process_custom_download_path(
+                custom_download_path,
+                model_info,
+                version_info,
+                model_category,
+                model_type_value,
+            )
+            if processed_path:
+                sub_path = os.path.join(*processed_path.split('/'))
+                print(f"[Server Download] Using custom download path: {sub_path}")
 
         # Filename: ignore any path separators in custom name; treat as base name only
         if custom_filename_input:
@@ -407,10 +335,12 @@ async def route_download_model(request):
             "num_connections": num_connections,
             "known_size": known_size_bytes,
             "api_key": resolved_api_key, # Pass API key for download auth if needed
+            "civitai_domain": api.domain,
             # Retry/context fields
             "model_url_or_id": model_url_or_id,
             "model_version_id": req_version_id,
             "custom_filename": custom_filename_input,
+            "custom_download_path": custom_download_path,
             "force_redownload": force_redownload,
             # UI Display Info
             "filename": final_filename,
@@ -447,7 +377,8 @@ async def route_download_model(request):
                 "thumbnail": thumbnail_url,
                 "thumbnail_nsfw_level": thumbnail_nsfw_level,
                 "path": output_path, # The intended final path
-                "size_kb": api_size_kb if api_size_kb else None # Use KB for display consistency
+                "size_kb": api_size_kb if api_size_kb else None, # Use KB for display consistency
+                "source_domain": api.domain,
             }
         })
 

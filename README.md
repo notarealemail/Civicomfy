@@ -37,6 +37,12 @@ ComfyUI Manager
 ## Configuration
 
 - Enter your Civitai API Token in the settings, or set `CIVITAI_API_KEY` in the server environment (useful for cloud deployments like RunPod).
+- Choose the Civitai domain used by search, previews, downloads, and result links: `civitai.com` or `civitai.red`.
+- Optional: enable searching the opposite domain when the selected domain returns no search results.
+- Optional: enable searching the opposite domain when the selected domain returns an error.
+- The Civicomfy panel uses a dark blue theme for `civitai.com` and a dark red theme for `civitai.red`.
+- Optional: set a custom download path using variables: `{model_name}`, `{base_model}`, `{model_category}`, and `{model_type}`.
+  - Example: `{model_type}/{base_model}/{model_name}`.
 - Optional: set a **Global Download Root** in Civicomfy settings.
   - When set, Civicomfy saves to `<global_root>/<model_type>` (for example `/runpod-volume/ComfyUI/checkpoints` or `/runpod-volume/ComfyUI/loras`).
   - When empty, Civicomfy uses the default ComfyUI paths (`folder_paths` / `extra_model_paths.yaml`).

@@ -3,6 +3,7 @@
 
 export function modalTemplate(settings = {}) {
   const numConnections = Number.isFinite(settings.numConnections) ? settings.numConnections : 1;
+  const civitaiDomain = settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
   return `
     <div class="civitai-downloader-modal-content">
       <div class="civitai-downloader-header">
@@ -20,7 +21,7 @@ export function modalTemplate(settings = {}) {
           <form id="civitai-download-form">
             <div class="civitai-form-group">
               <label for="civitai-model-url">Model URL or ID</label>
-              <input type="text" id="civitai-model-url" class="civitai-input" placeholder="e.g., https://civitai.com/models/12345 or 12345" required>
+              <input type="text" id="civitai-model-url" class="civitai-input" placeholder="e.g., https://${civitaiDomain}/models/12345 or 12345" required>
             </div>
             <p style="font-size: 0.9em; color: #ccc; margin-top: -10px; margin-bottom: 15px;">You can optionally specify a version ID using "?modelVersionId=xxxxx" in the URL or in the field below.</p>
             <div class="civitai-form-row">
@@ -52,6 +53,11 @@ export function modalTemplate(settings = {}) {
                 <input type="text" id="civitai-custom-filename" class="civitai-input" placeholder="Leave blank to use original name">
               </div>
               <div class="civitai-form-group">
+                <label for="civitai-custom-download-path">Custom Download Path (Optional)</label>
+                <input type="text" id="civitai-custom-download-path" class="civitai-input" placeholder="e.g., {model_type}/{base_model}/{model_name}">
+                <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Variables: <code>{model_name}</code>, <code>{base_model}</code>, <code>{model_category}</code>, <code>{model_type}</code>.</p>
+              </div>
+              <div class="civitai-form-group">
                 <label for="civitai-connections">Connections</label>
                 <input type="number" id="civitai-connections" class="civitai-input" value="${numConnections}" min="1" max="16" step="1" required disabled>
                 <p style="font-size: 0.9em; color: #ccc; margin-top: 7px; margin-bottom: 15px;">Disabled: Only single connection possible for now</p>
@@ -70,7 +76,7 @@ export function modalTemplate(settings = {}) {
         <div id="civitai-tab-search" class="civitai-downloader-tab-content">
           <form id="civitai-search-form">
             <div class="civitai-search-controls">
-              <input type="text" id="civitai-search-query" class="civitai-input" placeholder="Search Civitai...">
+              <input type="text" id="civitai-search-query" class="civitai-input" placeholder="Search ${civitaiDomain}...">
               <select id="civitai-search-type" class="civitai-select">
                 <option value="any">Any Type</option>
               </select>
@@ -150,9 +156,29 @@ export function modalTemplate(settings = {}) {
                   <label for="civitai-settings-default-type">Default Model Type (for saving)</label>
                   <select id="civitai-settings-default-type" class="civitai-select" required></select>
                 </div>
+                <div class="civitai-form-group">
+                  <label for="civitai-settings-custom-path">Default Custom Download Path</label>
+                  <input type="text" id="civitai-settings-custom-path" class="civitai-input" placeholder="e.g., {model_type}/{base_model}/{model_name}">
+                  <p style="font-size: 0.85em; color: #bbb; margin-top: 5px;">Leave blank to use the selected subfolder. Variables: <code>{model_name}</code>, <code>{base_model}</code>, <code>{model_category}</code>, <code>{model_type}</code>.</p>
+                </div>
               </div>
               <div class="civitai-settings-section">
                 <h4>Interface & Search</h4>
+                <div class="civitai-form-group">
+                  <label for="civitai-settings-domain">Civitai Domain</label>
+                  <select id="civitai-settings-domain" class="civitai-select">
+                    <option value="civitai.com" ${civitaiDomain === 'civitai.com' ? 'selected' : ''}>civitai.com</option>
+                    <option value="civitai.red" ${civitaiDomain === 'civitai.red' ? 'selected' : ''}>civitai.red</option>
+                  </select>
+                </div>
+                <div class="civitai-form-group inline">
+                  <input type="checkbox" id="civitai-settings-search-opposite" class="civitai-checkbox" ${settings.searchOppositeOnEmpty ? 'checked' : ''}>
+                  <label for="civitai-settings-search-opposite">Search the other domain when no results are found</label>
+                </div>
+                <div class="civitai-form-group inline">
+                  <input type="checkbox" id="civitai-settings-search-opposite-error" class="civitai-checkbox" ${settings.searchOppositeOnError ? 'checked' : ''}>
+                  <label for="civitai-settings-search-opposite-error">Search the other domain when the current domain errors</label>
+                </div>
                 <div class="civitai-form-group inline">
                   <input type="checkbox" id="civitai-settings-auto-open-status" class="civitai-checkbox">
                   <label for="civitai-settings-auto-open-status">Switch to Status tab after starting download</label>

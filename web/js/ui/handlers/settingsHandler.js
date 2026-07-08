@@ -12,6 +12,10 @@ export function getDefaultSettings() {
         searchResultLimit: 20,
         hideMatureInSearch: true,
         nsfwBlurMinLevel: 4, // Blur thumbnails with nsfwLevel >= this value
+        civitaiDomain: 'civitai.com',
+        searchOppositeOnEmpty: false,
+        searchOppositeOnError: false,
+        customDownloadPath: '',
     };
 }
 
@@ -72,6 +76,26 @@ export function applySettings(ui) {
         const val = Number(ui.settings.nsfwBlurMinLevel);
         ui.settingsNsfwThresholdInput.value = Number.isFinite(val) ? val : 4;
     }
+    if (ui.settingsCustomPathInput) {
+        ui.settingsCustomPathInput.value = ui.settings.customDownloadPath || '';
+    }
+    if (ui.settingsDomainSelect) {
+        ui.settingsDomainSelect.value = ui.settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+    }
+    if (ui.settingsSearchOppositeCheckbox) {
+        ui.settingsSearchOppositeCheckbox.checked = ui.settings.searchOppositeOnEmpty === true;
+    }
+    if (ui.settingsSearchOppositeErrorCheckbox) {
+        ui.settingsSearchOppositeErrorCheckbox.checked = ui.settings.searchOppositeOnError === true;
+    }
+    if (ui.searchQueryInput) {
+        const domain = ui.settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+        ui.searchQueryInput.placeholder = `Search ${domain}...`;
+    }
+    if (ui.modelUrlInput) {
+        const domain = ui.settings.civitaiDomain === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+        ui.modelUrlInput.placeholder = `e.g., https://${domain}/models/12345 or 12345`;
+    }
     if (ui.downloadConnectionsInput) {
         ui.downloadConnectionsInput.value = Math.max(1, Math.min(16, ui.settings.numConnections || 1));
     }
@@ -83,6 +107,10 @@ export function applySettings(ui) {
             if (first) ui.downloadModelTypeSelect.value = first.value;
         }
     }
+    if (ui.customDownloadPathInput) {
+        ui.customDownloadPathInput.value = ui.settings.customDownloadPath || '';
+    }
+    ui.applyDomainTheme?.();
     ui.searchPagination.limit = ui.settings.searchResultLimit || 20;
 }
 
@@ -138,6 +166,10 @@ export function handleSettingsSave(ui) {
     const autoOpenStatusTab = ui.settingsAutoOpenCheckbox.checked;
     const hideMatureInSearch = ui.settingsHideMatureCheckbox.checked;
     const nsfwBlurMinLevel = Number(ui.settingsNsfwThresholdInput.value);
+    const civitaiDomain = ui.settingsDomainSelect?.value === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+    const searchOppositeOnEmpty = ui.settingsSearchOppositeCheckbox?.checked === true;
+    const searchOppositeOnError = ui.settingsSearchOppositeErrorCheckbox?.checked === true;
+    const customDownloadPath = ui.settingsCustomPathInput?.value.trim() || '';
 
     if (isNaN(numConnections) || numConnections < 1 || numConnections > 16) {
         ui.showToast("Invalid Default Connections (must be 1-16).", "error");
@@ -154,6 +186,11 @@ export function handleSettingsSave(ui) {
     ui.settings.autoOpenStatusTab = autoOpenStatusTab;
     ui.settings.hideMatureInSearch = hideMatureInSearch;
     ui.settings.nsfwBlurMinLevel = (Number.isFinite(nsfwBlurMinLevel) && nsfwBlurMinLevel >= 0) ? Math.min(128, Math.round(nsfwBlurMinLevel)) : 4;
+    ui.settings.civitaiDomain = civitaiDomain;
+    ui.settings.searchOppositeOnEmpty = searchOppositeOnEmpty;
+    ui.settings.searchOppositeOnError = searchOppositeOnError;
+    ui.settings.customDownloadPath = customDownloadPath;
+    ui.downloadDomainOverride = null;
 
     ui.saveSettingsToCookie();
     ui.applySettings();

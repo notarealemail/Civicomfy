@@ -3,6 +3,7 @@
 # ================================================
 import json
 import os
+import re
 from typing import Any, Dict, Optional
 from aiohttp import web
 
@@ -38,6 +39,29 @@ def resolve_civitai_api_key(payload: Optional[Dict[str, Any]] = None) -> Optiona
         return env_key
 
     return None
+
+def resolve_civitai_domain(payload: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Resolve the selected Civitai domain from the request payload.
+    Only known Civitai domains are accepted.
+    """
+    request_domain = ""
+    if isinstance(payload, dict):
+        raw_domain = payload.get("civitai_domain", "")
+        if isinstance(raw_domain, str):
+            request_domain = raw_domain.strip()
+
+    return CivitaiAPI.normalize_domain(request_domain)
+
+def resolve_search_opposite_on_empty(payload: Optional[Dict[str, Any]] = None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("search_opposite_on_empty") is True
+
+def resolve_search_opposite_on_error(payload: Optional[Dict[str, Any]] = None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("search_opposite_on_error") is True
 
 async def get_civitai_model_and_version_details(api: CivitaiAPI, model_url_or_id: str, req_version_id: Optional[int]) -> Dict[str, Any]:
     """
@@ -174,3 +198,46 @@ async def get_civitai_model_and_version_details(api: CivitaiAPI, model_url_or_id
         "target_model_id": target_model_id,        # Resolved model ID
         "target_version_id": target_version_id,    # Resolved version ID (specific or latest)
     }
+
+def process_custom_download_path(custom_path: str, model_info: Dict[str, Any],
+                                 version_info: Dict[str, Any], model_category: Optional[str] = None,
+                                 model_type: str = "") -> str:
+    """
+    Process a custom relative download path by substituting safe variables.
+
+    Supported variables: {model_name}, {base_model}, {model_category}, {model_type}.
+    Unknown variables are removed, and traversal/absolute path segments are ignored.
+    """
+    if not custom_path or not isinstance(custom_path, str):
+        return ""
+
+    def sanitize_segment(value: Any, fallback: str) -> str:
+        if not isinstance(value, str):
+            value = fallback
+        value = value.strip() or fallback
+        value = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', value)
+        value = re.sub(r'[_\s]+', '_', value).strip('._ ')
+        return value[:100] or fallback
+
+    variables = {
+        "model_name": sanitize_segment(model_info.get("name"), "unknown_model"),
+        "base_model": sanitize_segment(version_info.get("baseModel"), "unknown_base"),
+        "model_category": sanitize_segment(model_category, "unknown_category"),
+        "model_type": sanitize_segment(model_type, "unknown_type"),
+    }
+
+    processed_path = custom_path
+    for var_name, var_value in variables.items():
+        processed_path = processed_path.replace("{" + var_name + "}", var_value)
+
+    processed_path = re.sub(r'\{[^}]*\}', '', processed_path)
+    processed_path = processed_path.replace('\\', '/')
+    processed_path = re.sub(r'/+', '/', processed_path).strip('/')
+
+    safe_parts = []
+    for part in processed_path.split('/'):
+        clean_part = sanitize_segment(part, "")
+        if clean_part and clean_part not in ('.', '..'):
+            safe_parts.append(clean_part)
+
+    return '/'.join(safe_parts)
